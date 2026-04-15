@@ -74,11 +74,19 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
 
+      - name: Create Pages project if needed
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+        continue-on-error: true
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .next --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }}
+          command: pages deploy .next --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
 
   deploy-preview:
     name: Deploy Preview
@@ -99,12 +107,20 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
 
+      - name: Create Pages project if needed
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+        continue-on-error: true
+
       - uses: cloudflare/wrangler-action@v3
         id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy .next --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }}
+          command: pages deploy .next --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
 
       - name: Comment preview URL
         uses: actions/github-script@v7
