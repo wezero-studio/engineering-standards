@@ -137,8 +137,8 @@ Every project must have these scripts:
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "treefmt",
     "format:check": "treefmt --fail-on-change",
     "type-check": "tsc --noEmit"
