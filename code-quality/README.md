@@ -45,7 +45,7 @@ Use the flat config format (`eslint.config.mjs`):
 ```js
 import { dirname } from "path";
 import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintcompat";
+import { FlatCompat } from "@eslint/eslintrc";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const compat = new FlatCompat({ baseDirectory: __dirname });
