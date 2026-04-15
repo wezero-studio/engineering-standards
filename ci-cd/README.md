@@ -1,8 +1,8 @@
 # CI/CD & Deployment
 
-**Standard: All projects deploy via GitHub Actions to Cloudflare Workers using `@opennextjs/cloudflare` and org-level secrets.**
+**Standard: All projects deploy via GitHub Actions to Cloudflare Pages using org-level secrets.**
 
-## Why Cloudflare (Not Vercel)
+## Why Cloudflare Pages (Not Vercel)
 
 Vercel's Git integration requires the commit author's email to match a Vercel team member. This caused:
 
@@ -11,69 +11,45 @@ Vercel's Git integration requires the commit author's email to match a Vercel te
 - No consistent deployment pipeline
 - Poor DX when multiple people contribute
 
-Cloudflare has none of these issues - deploy with an API token, no account matching required.
+Cloudflare Pages has none of these issues - deploy with an API token, no account matching required, and preview deployments are free and automatic.
 
 ## How It Works
 
-Next.js apps are built with `@opennextjs/cloudflare`, which adapts the Next.js output (including SSR, API routes, middleware) to run on Cloudflare Workers. The build produces a `.open-next/` directory containing the worker and static assets.
-
-### Required Files
-
-| File | Purpose |
-|------|---------|
-| `wrangler.jsonc` | Cloudflare Workers config (name, compatibility, assets) |
-| `open-next.config.ts` | OpenNext adapter config |
-| `.dev.vars` | Local dev environment variables |
-| `public/_headers` | Static asset cache headers |
-
-### Required Packages
-
-```bash
-bun add -D @opennextjs/cloudflare wrangler
-```
-
-### Required Scripts
-
-```json
-{
-  "build": "next build",
-  "deploy:build": "opennextjs-cloudflare build",
-  "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-  "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
-}
-```
+Next.js builds with `output: "export"` which produces a static `out/` directory. This gets deployed directly to Cloudflare Pages via `wrangler pages deploy out`.
 
 ### next.config.ts
-
-Must include `output: "standalone"` (required by opennext):
 
 ```ts
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: "export",
 };
 
 export default nextConfig;
+```
 
-if (process.env.NODE_ENV === "development") {
-  import("@opennextjs/cloudflare").then(({ initOpenNextCloudflareForDev }) =>
-    initOpenNextCloudflareForDev(),
-  );
-}
+### Static Asset Caching
+
+Add `public/_headers` for immutable cache on hashed assets:
+
+```
+/_next/static/*
+  Cache-Control: public,max-age=31536000,immutable
 ```
 
 ## Required Secrets (set at org level)
 
 | Secret/Variable | Type | Description |
 |----------------|------|-------------|
-| `CLOUDFLARE_API_TOKEN` | Secret | API token with Workers edit permissions |
+| `CLOUDFLARE_API_TOKEN` | Secret | API token with Cloudflare Pages edit permissions |
 | `CLOUDFLARE_ACCOUNT_ID` | Secret | Wezero Studio Cloudflare account ID |
+| `CLOUDFLARE_PROJECT_NAME` | Variable (per-repo) | Cloudflare Pages project name |
 
 ### Creating the API Token
 
 1. Go to [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-2. Create a token with **Workers Scripts: Edit** permission
+2. Create a token with **Cloudflare Pages: Edit** permission
 3. Add it as an org-level secret: `CLOUDFLARE_API_TOKEN`
 
 ## Standard Workflow
@@ -106,7 +82,7 @@ jobs:
       - run: bun run build
 
   deploy:
-    name: Deploy to Cloudflare
+    name: Deploy to Cloudflare Pages
     needs: ci
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -121,13 +97,21 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
-      - run: bun run deploy:build
+      - run: bun run build
+
+      - name: Create Pages project if needed
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+        continue-on-error: true
 
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --commit-dirty=true
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
 
   deploy-preview:
     name: Deploy Preview
@@ -146,14 +130,22 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
-      - run: bun run deploy:build
+      - run: bun run build
+
+      - name: Create Pages project if needed
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+        continue-on-error: true
 
       - uses: cloudflare/wrangler-action@v3
         id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: versions upload --commit-dirty=true
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
 
       - name: Comment preview URL
         uses: actions/github-script@v7
@@ -163,42 +155,45 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `Preview version uploaded. Use \`wrangler versions deploy\` to promote.`
+              body: `Preview deployed to: ${{ steps.deploy.outputs.deployment-url }}`
             })
 ```
 
 ### Key Points
 
-- **PR builds run CI + upload a preview version**
+- **PR builds run CI + deploy a preview** with the URL posted as a PR comment
 - **Pushes to `main` run CI then deploy to production** - only after CI passes
-- `deploy:build` runs `opennextjs-cloudflare build` which calls `next build` internally then adapts the output
-- `wrangler deploy` reads `wrangler.jsonc` for the worker config and deploys the `.open-next/` output
-- The worker name in `wrangler.jsonc` determines the `*.workers.dev` subdomain
+- `next build` with `output: "export"` produces a static `out/` directory
+- `wrangler pages deploy out` uploads that directory to Cloudflare Pages
+- The Pages project is auto-created on first deploy (`continue-on-error: true` handles existing projects)
+- No Workers, no adapters, no extra dependencies
 
 ### Setting Up a New Project
 
 1. Clone the `template-nextjs` repo (already has all config)
-2. Update `name` and `services[0].service` in `wrangler.jsonc` to your project name
+2. Add `CLOUDFLARE_PROJECT_NAME` as a repo-level variable on GitHub (Settings > Variables)
 3. Ensure org-level secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are accessible to the repo
-4. Push to `main` - the worker is created and deployed automatically
+4. Push to `main` - the Pages project is created and deployed automatically
 
 ### Custom Domains
 
 After the first deploy:
 
-1. Go to Cloudflare Dashboard > Workers & Pages > your worker > Settings > Domains & Routes
-2. Add your domain (must be on Cloudflare DNS)
+1. Go to Cloudflare Dashboard > Pages > your project > Custom domains
+2. Add your domain (must be on Cloudflare DNS or you add a CNAME)
 3. SSL is automatic
 
 ### Migrating from Vercel
 
-1. Install `@opennextjs/cloudflare` and `wrangler`
-2. Add `wrangler.jsonc`, `open-next.config.ts`, `.dev.vars`, `public/_headers`
-3. Set `output: "standalone"` in `next.config.ts`
-4. Add `initOpenNextCloudflareForDev()` for local dev
-5. Update package.json scripts (`deploy:build`, `preview`, `deploy`)
-6. Add the GitHub Actions workflow
-7. Push to `main`
-8. Update DNS to point to Cloudflare
-9. Remove the Vercel project, `.vercel/`, and `vercel.json`
-10. Update `.gitignore` (add `.open-next/`, `.wrangler/`, remove `.vercel`)
+1. Set `output: "export"` in `next.config.ts`
+2. Add `public/_headers` for static cache
+3. Add the GitHub Actions workflow
+4. Set up secrets/variables on GitHub
+5. Push to `main` (Pages project is auto-created)
+6. Update DNS to point to Cloudflare Pages
+7. Remove the Vercel project, `.vercel/`, and `vercel.json`
+8. Update `.gitignore` (replace `.vercel` with `.wrangler/`)
+
+### Need SSR?
+
+If a project needs server-side rendering, API routes, or middleware, use `@opennextjs/cloudflare` to deploy to Cloudflare Workers instead. See the [OpenNext Cloudflare docs](https://opennext.js.org/cloudflare) for setup. The static Pages approach is preferred when possible - it's simpler, faster, and cheaper.
