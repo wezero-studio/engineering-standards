@@ -146,15 +146,8 @@ jobs:
 
       - run: bun run build
 
-      - name: Create Pages project if needed
+      - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create ${{ github.event.repository.name }} --production-branch=main
-        continue-on-error: true
-
-      - uses: cloudflare/wrangler-action@v3
         id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -210,15 +203,8 @@ jobs:
 
       - run: bun run build
 
-      - name: Create Pages project if needed
+      - name: Deploy preview
         uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create ${{ github.event.repository.name }} --production-branch=main
-        continue-on-error: true
-
-      - uses: cloudflare/wrangler-action@v3
         id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -243,8 +229,8 @@ jobs:
 - **Pushes to `main` run CI then deploy to production** - only after CI passes
 - `next build` with `output: "export"` produces a static `out/` directory
 - `wrangler pages deploy out` uploads that directory to Cloudflare Pages
-- The Pages project is auto-created on first deploy (`continue-on-error: true` handles existing projects)
-- The Cloudflare project name is derived from the GitHub repo name - no per-repo config needed
+- `wrangler pages deploy` creates the project on first deploy and updates it on subsequent deploys
+- The Cloudflare project name is derived from the GitHub repo name — no per-repo config needed
 - After production deploy, the GitHub repository homepage URL is automatically set to the deployment URL
 - No Workers, no adapters, no extra dependencies
 
