@@ -49,8 +49,10 @@ Use this checklist when starting a new project or auditing an existing one.
 
 - [ ] `.github/workflows/ci.yml` exists
 - [ ] CI runs: `bun install --frozen-lockfile` -> `lint` -> `type-check` -> `build`
-- [ ] Deploy job uses `CLOUDFLARE_API_TOKEN` (org-level secret)
-- [ ] `CLOUDFLARE_PROJECT_NAME` set as repo variable
+- [ ] Deploy job uses `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (org-level secrets)
+- [ ] `GH_ADMIN_TOKEN` org secret set (PAT with `administration:write` — enables auto homepage URL)
+- [ ] Project name derived from repo name (no per-repo variables needed)
+- [ ] Repository homepage URL auto-set on deploy
 - [ ] PR preview deployments working
 - [ ] Deployment tested end-to-end
 

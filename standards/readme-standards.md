@@ -28,11 +28,12 @@ List the major technologies. Keep it brief.
 ```markdown
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 15 (static export, no SSR)
 - **Styling**: Tailwind CSS v4
 - **Database**: Drizzle ORM + Turso
 - **Auth**: Better Auth
-- **Deployment**: Cloudflare Pages via GitHub Actions
+- **Hosting**: Cloudflare Pages (static files)
+- **CI/CD**: GitHub Actions
 ```
 
 ### 3. Getting Started

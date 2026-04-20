@@ -40,17 +40,27 @@ Add `public/_headers` for immutable cache on hashed assets:
 
 ## Required Secrets (set at org level)
 
-| Secret/Variable | Type | Description |
-|----------------|------|-------------|
-| `CLOUDFLARE_API_TOKEN` | Secret | API token with Cloudflare Pages edit permissions |
-| `CLOUDFLARE_ACCOUNT_ID` | Secret | Wezero Studio Cloudflare account ID |
-| `CLOUDFLARE_PROJECT_NAME` | Variable (per-repo) | Cloudflare Pages project name |
+| Secret | Description |
+|--------|-------------|
+| `CLOUDFLARE_API_TOKEN` | API token with Cloudflare Pages edit permissions |
+| `CLOUDFLARE_ACCOUNT_ID` | Wezero Studio Cloudflare account ID |
+| `GH_ADMIN_TOKEN` | PAT with `administration:write` scope — sets repo homepage URL on deploy |
 
-### Creating the API Token
+The Cloudflare Pages project name is derived automatically from the GitHub repository name (`github.event.repository.name`). No per-repo variables are needed.
+
+### Creating the Cloudflare API Token
 
 1. Go to [Cloudflare Dashboard > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
 2. Create a token with **Cloudflare Pages: Edit** permission
 3. Add it as an org-level secret: `CLOUDFLARE_API_TOKEN`
+
+### Creating the GitHub Admin Token
+
+1. Go to [GitHub Settings > Fine-grained tokens](https://github.com/settings/tokens?type=beta)
+2. Create a token scoped to the `wezero-studio` org with **Administration: Read and write** permission
+3. Add it as an org-level secret: `GH_ADMIN_TOKEN`
+
+This token allows the deploy workflow to automatically set each repository's homepage URL to the Cloudflare Pages deployment URL. If not set, the step is skipped with a warning — deployments still succeed.
 
 ## Standard Workflow
 
@@ -65,6 +75,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+
 jobs:
   ci:
     name: Lint, Type-check & Build
@@ -76,7 +89,24 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - run: bun install --frozen-lockfile
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('src/**', 'public/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            nextjs-${{ runner.os }}-
+
       - run: bun run lint
       - run: bun run type-check
       - run: bun run build
@@ -96,7 +126,24 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - run: bun install --frozen-lockfile
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('src/**', 'public/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            nextjs-${{ runner.os }}-
+
       - run: bun run build
 
       - name: Create Pages project if needed
@@ -104,14 +151,28 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+          command: pages project create ${{ github.event.repository.name }} --production-branch=main
         continue-on-error: true
 
       - uses: cloudflare/wrangler-action@v3
+        id: deploy
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
+          command: pages deploy out --project-name=${{ github.event.repository.name }} --commit-dirty=true
+
+      - name: Set repository homepage to deployment URL
+        env:
+          GH_TOKEN: ${{ secrets.GH_ADMIN_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GH_ADMIN_TOKEN not set — skipping homepage update. Add a PAT with admin scope as an org secret to enable this."
+            exit 0
+          fi
+          DEPLOY_URL="${{ steps.deploy.outputs.deployment-url }}"
+          PAGES_URL="https://${{ github.event.repository.name }}.pages.dev"
+          HOMEPAGE="${DEPLOY_URL:-$PAGES_URL}"
+          gh repo edit --homepage "$HOMEPAGE"
 
   deploy-preview:
     name: Deploy Preview
@@ -129,7 +190,24 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - run: bun install --frozen-lockfile
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ hashFiles('src/**', 'public/**') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            nextjs-${{ runner.os }}-
+
       - run: bun run build
 
       - name: Create Pages project if needed
@@ -137,7 +215,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages project create ${{ vars.CLOUDFLARE_PROJECT_NAME }} --production-branch=main
+          command: pages project create ${{ github.event.repository.name }} --production-branch=main
         continue-on-error: true
 
       - uses: cloudflare/wrangler-action@v3
@@ -145,7 +223,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PROJECT_NAME }} --commit-dirty=true
+          command: pages deploy out --project-name=${{ github.event.repository.name }} --commit-dirty=true
 
       - name: Comment preview URL
         uses: actions/github-script@v7
@@ -166,14 +244,17 @@ jobs:
 - `next build` with `output: "export"` produces a static `out/` directory
 - `wrangler pages deploy out` uploads that directory to Cloudflare Pages
 - The Pages project is auto-created on first deploy (`continue-on-error: true` handles existing projects)
+- The Cloudflare project name is derived from the GitHub repo name - no per-repo config needed
+- After production deploy, the GitHub repository homepage URL is automatically set to the deployment URL
 - No Workers, no adapters, no extra dependencies
 
 ### Setting Up a New Project
 
 1. Clone the `template-nextjs` repo (already has all config)
-2. Add `CLOUDFLARE_PROJECT_NAME` as a repo-level variable on GitHub (Settings > Variables)
-3. Ensure org-level secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are accessible to the repo
-4. Push to `main` - the Pages project is created and deployed automatically
+2. Ensure org-level secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) are accessible to the repo
+3. Push to `main` - the Pages project is created, deployed, and the repo homepage URL is set automatically
+
+No per-repo variables or manual GitHub UI configuration required.
 
 ### Custom Domains
 
